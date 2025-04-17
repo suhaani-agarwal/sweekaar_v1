@@ -18,6 +18,11 @@
     --foreground: #ededed;
   }
 }
+.video-fix {
+  transform: rotateY(180deg); /* Flip for mirror effect */
+  -webkit-transform: rotateY(180deg);
+  -moz-transform: rotateY(180deg);
+}
 
 body {
   background: var(--background);

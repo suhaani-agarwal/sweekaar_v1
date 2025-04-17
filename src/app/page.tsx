@@ -14,19 +14,19 @@ export default function Home() {
       name: "Dr. Anjali Mehta",
       specialty: "Behavioral Therapist",
       experience: "12 years experience with autism spectrum disorders",
-      image: "https://coralheartcounseling.com/wp-content/uploads/2024/06/SonaliS.BioPic-683x1024.webp"
+      image: "/therapist1.png"
     },
     {
       name: "Dr. Rahul Singh",
       specialty: "Speech Therapist",
       experience: "10 years specializing in communication development",
-      image: "/therapist2.jpg"
+      image: "/public/therapist2.png"
     },
     {
       name: "Dr. Priya Joshi",
       specialty: "Occupational Therapist",
       experience: "8 years working with sensory processing disorders",
-      image: "/therapist3.jpg"
+      image: "/therapist3.png"
     },
     {
       name: "Dr. Vikram Patel",

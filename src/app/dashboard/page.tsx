@@ -998,7 +998,7 @@ function TherapistCard({ therapists }: { therapists: Therapist[] }) {
         ))}
       </div>
       <div className="mt-4">
-        <Link href="/therapists" className="font-medium text-sm flex items-center hover:opacity-90" style={{ color: colors.secondary }}>
+        <Link href="/dashboard/therapists" className="font-medium text-sm flex items-center hover:opacity-90" style={{ color: colors.secondary }}>
           View all therapists
           <svg className="w-4 h-4 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7"></path>
@@ -1131,7 +1131,7 @@ function GuidanceCard({ condition }: { condition: string }) {
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7"></path>
           </svg>
         </Link>
-        <Link href="/guides/recommended" className="font-medium text-sm flex items-center hover:opacity-90" style={{ color: colors.secondary }}>
+        <Link href="/dashboard/guidance" className="font-medium text-sm flex items-center hover:opacity-90" style={{ color: colors.secondary }}>
           Get personalized recommendations
           <svg className="w-4 h-4 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7"></path>
@@ -1384,9 +1384,9 @@ export default function DashboardPage() {
           <div className="flex flex-col md:flex-row justify-between items-start md:items-center">
             <div>
               <h2 className="text-2xl md:text-3xl font-bold text-white" style={{ color: colors.white }}>Welcome, {userData.parentName} !</h2>
-              <p className="mt-2 text-white" style={{ color: colors.primaryLight }}>
-                <div className='text-white'>Supporting {userData.childName}'s journey with {childCondition}</div>
-              </p>
+              <div className="mt-2 text-white" style={{ color: colors.primaryLight }}>
+                <p className='text-white'>Supporting {userData.childName}'s journey with {childCondition}</p>
+              </div>
             </div>
             <div className="mt-4 md:mt-0">
               <button className="px-4 py-2 rounded hover:opacity-90 transition font-medium" style={{ backgroundColor: colors.white, color: colors.primaryDark }}>

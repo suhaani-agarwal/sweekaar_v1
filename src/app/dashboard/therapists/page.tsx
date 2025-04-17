@@ -377,12 +377,12 @@ export default function Home() {
                         <div className="flex items-center">
                             <span className="text-white text-2xl font-bold">TherapyConnect</span>
                         </div>
-                        <button
+                        <Link href='/dashboard'><button
                             style={{ backgroundColor: colors.accent, color: colors.darkText }}
                             className="px-4 py-2 rounded-md font-medium hover:opacity-90 transition duration-300"
                         >
                             Go to Dashboard
-                        </button>
+                        </button></Link>
                     </div>
                 </div>
             </header>

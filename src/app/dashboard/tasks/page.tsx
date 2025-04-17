@@ -107,6 +107,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { tasks } from '@/lib/tasks';
+import Link from 'next/link';
 
 // Color scheme definition
 const colors = {
@@ -194,7 +195,23 @@ export default function TaskSelection() {
   };
 
   return (
+    
     <div style={{ backgroundColor: colors.background }} className="min-h-screen py-8 px-4">
+      <header style={{ backgroundColor: colors.primaryLight }} className="shadow-lg">
+                <div className="container mx-auto px-4 py-6">
+                    <div className="flex justify-between items-center">
+                        <div className="flex items-center">
+                            <span className="text-white text-2xl font-bold">TherapyConnect</span>
+                        </div>
+                        <Link href='/dashboard'><button
+                            style={{ backgroundColor: colors.accent, color: colors.primaryDark }}
+                            className="px-4 py-2 rounded-md font-medium hover:opacity-90 transition duration-300"
+                        >
+                            Go to Dashboard
+                        </button></Link>
+                    </div>
+                </div>
+            </header>
       <div className="max-w-4xl mx-auto p-6 bg-white rounded-2xl shadow-lg">
         <h1 style={{ color: colors.text }} className="text-3xl font-bold mb-4 text-center">
           Choose Your Daily Task!

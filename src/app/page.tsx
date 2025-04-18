@@ -152,11 +152,15 @@ export default function Home() {
             </div>
             <div className="md:w-1/2 flex justify-center">
               <div className="relative w-full h-64 md:h-96 rounded-lg overflow-hidden">
-                <div className="w-full h-full flex items-center justify-center" style={{ backgroundColor: colors.primaryLight }}>
-                  <p style={{ color: colors.text }}>Image of children playing and learning together</p>
-                </div>
+                <Image
+                  src="https://behavioral-innovations.com/wp-content/uploads/2023/10/hero-1.jpg"
+                  alt="Children playing"
+                  fill
+                  className="object-cover"
+                  unoptimized // Required for external images unless you configure next.config.js
+                />
               </div>
-            </div>
+              </div>
           </div>
         </section>
 

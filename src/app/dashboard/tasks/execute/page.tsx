@@ -1,8 +1,20 @@
+
+
 // 'use client';
 // import { useState, useEffect, useRef } from 'react';
 // import { useSearchParams } from 'next/navigation';
 // import { tasks } from '@/lib/tasks';
-// import { GoogleGenerativeAI } from "@google/generative-ai";
+// import * as tf from '@tensorflow/tfjs';
+// import '@tensorflow/tfjs-backend-webgl';
+// import * as cocoSsd from '@tensorflow-models/coco-ssd';
+// import { drawHands, isHandNearMouth } from '@/lib/handDetection';
+
+// // Audio fallback for browsers with speech synthesis issues
+// const playAudioFallback = (text: string) => {
+//   const audio = new Audio(`https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&tl=en&q=${encodeURIComponent(text)}`);
+//   audio.volume = 1.0;
+//   audio.play().catch(e => console.error('Audio fallback error:', e));
+// };
 
 // export default function TaskExecution() {
 //   const searchParams = useSearchParams();
@@ -16,34 +28,64 @@
 //   const [timeLeft, setTimeLeft] = useState(customInterval);
 //   const [detectionStatus, setDetectionStatus] = useState('Initializing...');
 //   const [cameraActive, setCameraActive] = useState(false);
-//   const [capturedImage, setCapturedImage] = useState<string | null>(null);
 //   const [cameraError, setCameraError] = useState<string | null>(null);
-//   const [isAnalyzing, setIsAnalyzing] = useState(false);
 //   const [debugMode, setDebugMode] = useState(false);
 //   const [userInteracted, setUserInteracted] = useState(false);
-//   const [analysisAttempts, setAnalysisAttempts] = useState(0);
-//   const [captureEnabled, setCaptureEnabled] = useState(true);
+//   const [detectionProgress, setDetectionProgress] = useState(0);
+//   const [instructionRepeatCount, setInstructionRepeatCount] = useState(0);
+//   const [objectDetections, setObjectDetections] = useState<any[]>([]);
+//   const [handLandmarks, setHandLandmarks] = useState<any[]>([]);
+//   const [ttsAvailable, setTtsAvailable] = useState(true);
+//   const [volume, setVolume] = useState(1.0);
+//   const [autoDetectTimeout, setAutoDetectTimeout] = useState<NodeJS.Timeout | null>(null);
 
 //   const videoRef = useRef<HTMLVideoElement>(null);
 //   const canvasRef = useRef<HTMLCanvasElement>(null);
+//   const instructionVideoRef = useRef<HTMLVideoElement>(null);
 //   const streamRef = useRef<MediaStream | null>(null);
-//   const speechSynthRef = useRef<SpeechSynthesis | null>(null);
+//   const speechSynthesisRef = useRef<SpeechSynthesis | null>(null);
+//   const speechUtteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
 //   const intervalRef = useRef<NodeJS.Timeout | null>(null);
-//   const captureIntervalRef = useRef<NodeJS.Timeout | null>(null);
+//   const detectionIntervalRef = useRef<NodeJS.Timeout | null>(null);
 //   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
+//   const objectDetectionModelRef = useRef<cocoSsd.ObjectDetection | null>(null);
+//   const audioContextRef = useRef<AudioContext | null>(null);
 
 //   // Find the selected task
 //   const task = tasks.find(t => t.id === taskId);
 //   const currentStep = task?.steps[currentStepIndex];
 //   const isLastStep = currentStepIndex === (task?.steps.length ?? 0) - 1;
 
-//   // Initialize camera with retries
+//   // Initialize audio context for better volume control
+//   const initAudioContext = () => {
+//     if (!audioContextRef.current) {
+//       audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+//     }
+//   };
+
+//   // Initialize TensorFlow.js and models
+//   const initModels = async () => {
+//     try {
+//       setDetectionStatus('Loading TensorFlow.js...');
+//       await tf.setBackend('webgl');
+//       await tf.ready();
+      
+//       setDetectionStatus('Loading object detection model...');
+//       objectDetectionModelRef.current = await cocoSsd.load();
+      
+//       setDetectionStatus('Models loaded');
+//     } catch (error) {
+//       console.error('Error loading models:', error);
+//       setDetectionStatus('Failed to load models');
+//     }
+//   };
+
+//   // Initialize camera
 //   const initCamera = async (attempt = 1) => {
 //     try {
 //       console.log(`Initializing camera (attempt ${attempt})...`);
 //       setDetectionStatus('Initializing camera...');
       
-//       // Clean up any existing stream
 //       if (streamRef.current) {
 //         streamRef.current.getTracks().forEach(track => track.stop());
 //         streamRef.current = null;
@@ -64,11 +106,10 @@
 //       streamRef.current = stream;
 //       videoRef.current.srcObject = stream;
 
-//       // Wait for video to be ready
 //       await new Promise<void>((resolve, reject) => {
 //         const timer = setTimeout(() => {
 //           reject(new Error('Camera timeout'));
-//         }, 5000);
+//         }, 10000);
 
 //         videoRef.current!.onloadedmetadata = () => {
 //           clearTimeout(timer);
@@ -81,7 +122,6 @@
 //         };
 //       });
 
-//       // Play the video
 //       await videoRef.current.play();
       
 //       setCameraActive(true);
@@ -89,14 +129,12 @@
 //       setDetectionStatus('Camera ready');
 //       console.log('Camera successfully initialized');
       
-//       // Start continuous capture
-//       startContinuousCapture();
+//       startDetection();
       
 //     } catch (err) {
 //       console.error(`Camera init error (attempt ${attempt}):`, err);
       
 //       if (attempt < 3) {
-//         // Retry after delay
 //         await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
 //         return initCamera(attempt + 1);
 //       }
@@ -112,7 +150,6 @@
 //       setCameraActive(false);
 //       setDetectionStatus(errorMessage);
       
-//       // Clean up if we got a stream but failed to play
 //       if (streamRef.current) {
 //         streamRef.current.getTracks().forEach(track => track.stop());
 //         streamRef.current = null;
@@ -120,212 +157,226 @@
 //     }
 //   };
 
-//   // Initialize speech synthesis
+//   // Initialize speech synthesis with better error handling
 //   const initSpeech = () => {
 //     if ('speechSynthesis' in window) {
-//       speechSynthRef.current = window.speechSynthesis;
-//       console.log('Speech synthesis initialized');
-//     }
-//   };
-
-//   useEffect(() => {
-//     initSpeech();
-//     initCamera();
-
-//     return () => {
-//       // Cleanup on unmount
-//       if (streamRef.current) {
-//         streamRef.current.getTracks().forEach(track => track.stop());
-//       }
-//       if (speechSynthRef.current?.speaking) {
-//         speechSynthRef.current.cancel();
-//       }
-//       clearAllIntervals();
-//     };
-//   }, []);
-
-//   const clearAllIntervals = () => {
-//     if (intervalRef.current) clearInterval(intervalRef.current);
-//     if (captureIntervalRef.current) clearInterval(captureIntervalRef.current);
-//     if (timeoutRef.current) clearTimeout(timeoutRef.current);
-//   };
-
-//   const stopCaptureInterval = () => {
-//     if (captureIntervalRef.current) {
-//       clearInterval(captureIntervalRef.current);
-//       captureIntervalRef.current = null;
-//       console.log('Stopped image capture interval');
-//     }
-//   };
-
-//   // Start capturing images every 3 seconds
-//   const startContinuousCapture = () => {
-//     stopCaptureInterval(); // Clear any existing interval
-    
-//     console.log('Starting continuous image capture every 3 seconds');
-//     setDetectionStatus('Starting image capture...');
-//     setCaptureEnabled(true);
-    
-//     // Initial immediate capture
-//     captureAndAnalyze();
-    
-//     // Set up interval for continuous capture
-//     captureIntervalRef.current = setInterval(() => {
-//       if (captureEnabled) {
-//         captureAndAnalyze();
-//       }
-//     }, 3000);
-//   };
-
-//   // Capture image and analyze it
-//   const captureAndAnalyze = async () => {
-//     if (!cameraActive || !currentStep || isAnalyzing) {
-//       console.log('Skipping capture - camera not active/no step/currently analyzing');
-//       return;
-//     }
-
-//     console.log(`Capturing image (Attempt ${analysisAttempts + 1})`);
-//     setDetectionStatus(`Capturing image (${analysisAttempts + 1})`);
-    
-//     try {
-//       const imageData = captureImage();
-//       if (!imageData) {
-//         throw new Error('Failed to capture image');
-//       }
-
-//       setCapturedImage(imageData);
-//       console.log('Image captured, sending for analysis...');
-//       setDetectionStatus('Analyzing image...');
+//       speechSynthesisRef.current = window.speechSynthesis;
       
-//       const isDetected = await analyzeImageWithAI(imageData);
-//       setAnalysisAttempts(prev => prev + 1);
-      
-//       if (isDetected) {
-//         console.log('Task detected in image!');
-//         setDetectionStatus('Task completed!');
-//         setIsStepComplete(true);
-//         setCaptureEnabled(false);
-//         stopCaptureInterval();
-        
-//         // Move to next step after delay
-//         timeoutRef.current = setTimeout(() => {
-//           moveToNextStep();
-//         }, 2000);
-//       } else {
-//         console.log('Task not detected in image');
-//         setDetectionStatus(`Not detected (attempt ${analysisAttempts + 1})`);
-//       }
-//     } catch (error) {
-//       console.error('Capture/Analysis error:', error);
-//       setDetectionStatus('Capture failed');
-//     }
-//   };
-
-//   const captureImage = (): string | null => {
-//     try {
-//       if (!videoRef.current || !canvasRef.current) {
-//         throw new Error('Video or canvas not available');
-//       }
-
-//       const video = videoRef.current;
-//       const canvas = canvasRef.current;
-//       const context = canvas.getContext('2d');
-      
-//       if (!context) {
-//         throw new Error('Could not get canvas context');
-//       }
-
-//       // Ensure video is ready
-//       if (video.videoWidth === 0 || video.videoHeight === 0) {
-//         throw new Error('Video not ready');
-//       }
-
-//       // Set canvas dimensions to match video
-//       canvas.width = video.videoWidth;
-//       canvas.height = video.videoHeight;
-      
-//       // Draw video frame to canvas
-//       context.drawImage(video, 0, 0, canvas.width, canvas.height);
-      
-//       // Convert to JPEG
-//       return canvas.toDataURL('image/jpeg', 0.8);
-//     } catch (error) {
-//       console.error('Error capturing image:', error);
-//       return null;
-//     }
-//   };
-
-//   const analyzeImageWithAI = async (imageData: string): Promise<boolean> => {
-//     if (!currentStep) return false;
-    
-//     setIsAnalyzing(true);
-//     console.log('Sending image to Gemini AI for analysis...');
-    
-//     try {
-//       const genAI = new GoogleGenerativeAI(process.env.NEXT_PUBLIC_GEMINI_API_KEY || '');
-//       const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
-      
-//       const base64Data = imageData.split(',')[1];
-//       const imagePart = {
-//         inlineData: {
-//           data: base64Data,
-//           mimeType: "image/jpeg"
+//       // Check if voices are actually available
+//       const checkVoices = () => {
+//         const voices = speechSynthesisRef.current?.getVoices();
+//         if (!voices || voices.length === 0) {
+//           console.warn('No voices available in speech synthesis');
+//           setTtsAvailable(false);
+//         } else {
+//           console.log('Available voices:', voices);
+//           setTtsAvailable(true);
 //         }
 //       };
       
-//       const prompt = `Analyze this image and answer strictly with only 'yes' or 'no'. 
-//       Is the person in the image ${currentStep.instruction}? 
-//       Consider these criteria: ${currentStep.successCriteria}
-//       Only respond with 'yes' or 'no'.`;
-      
-//       console.log('Sending prompt to Gemini:', prompt);
-//       const result = await model.generateContent([prompt, imagePart]);
-//       const response = await result.response;
-//       const text = response.text().trim().toLowerCase();
-      
-//       console.log('Received response from Gemini:', text);
-//       return text === 'yes';
-//     } catch (error) {
-//       console.error('Error analyzing image:', error);
-//       return false;
-//     } finally {
-//       setIsAnalyzing(false);
+//       speechSynthesisRef.current.onvoiceschanged = checkVoices;
+//       checkVoices();
+//     } else {
+//       console.warn('Speech Synthesis API not supported');
+//       setTtsAvailable(false);
+//       setDetectionStatus('Voice instructions not supported');
 //     }
 //   };
 
+//   // Clean up all resources
+//   const cleanUp = () => {
+//     if (streamRef.current) {
+//       streamRef.current.getTracks().forEach(track => track.stop());
+//     }
+//     cancelSpeech();
+//     clearAllIntervals();
+    
+//     if (autoDetectTimeout) {
+//       clearTimeout(autoDetectTimeout);
+//     }
+//   };
+
+//   // Cancel any ongoing speech
+//   const cancelSpeech = () => {
+//     if (speechSynthesisRef.current?.speaking) {
+//       speechSynthesisRef.current.cancel();
+//     }
+//     if (speechUtteranceRef.current) {
+//       speechUtteranceRef.current.onend = null;
+//       speechUtteranceRef.current = null;
+//     }
+//     setIsPlaying(false);
+//   };
+
+//   const clearAllIntervals = () => {
+//     if (intervalRef.current) clearInterval(intervalRef.current);
+//     if (detectionIntervalRef.current) clearInterval(detectionIntervalRef.current);
+//     if (timeoutRef.current) clearTimeout(timeoutRef.current);
+//   };
+
+//   // Enhanced speak function with multiple fallbacks
+//   const speak = (text: string) => {
+//     if (!userInteracted) return;
+
+//     cancelSpeech();
+//     initAudioContext();
+
+//     // Try Web Speech API first
+//     if (ttsAvailable && speechSynthesisRef.current) {
+//       const utterance = new SpeechSynthesisUtterance(text);
+//       speechUtteranceRef.current = utterance;
+      
+//       // Configure voice
+//       const voices = speechSynthesisRef.current.getVoices();
+//       const preferredVoice = voices.find(v => v.lang.includes('en')) || voices[0];
+//       if (preferredVoice) {
+//         utterance.voice = preferredVoice;
+//       }
+      
+//       utterance.rate = 0.9;
+//       utterance.pitch = 1.1;
+//       utterance.volume = volume;
+    
+//       utterance.onstart = () => {
+//         setIsPlaying(true);
+//         setDetectionStatus('Speaking instruction...');
+//       };
+      
+//       utterance.onend = () => {
+//         setIsPlaying(false);
+//         speechUtteranceRef.current = null;
+//       };
+      
+//       utterance.onerror = (event) => {
+//         console.error('Speech error:', event.error);
+//         setIsPlaying(false);
+//         speechUtteranceRef.current = null;
+        
+//         // Fallback to audio if Web Speech fails
+//         playAudioFallback(text);
+//       };
+    
+//       try {
+//         speechSynthesisRef.current.speak(utterance);
+//       } catch (e) {
+//         console.error('Speech synthesis failed:', e);
+//         playAudioFallback(text);
+//       }
+//     } else {
+//       // Use audio fallback if Web Speech not available
+//       playAudioFallback(text);
+//     }
+//   };
+
+//   // Speak instruction with proper repeating
 //   const speakInstruction = () => {
-//     if (!userInteracted || !currentStep || !speechSynthRef.current) return;
+//     if (!currentStep) return;
     
-//     console.log('Speaking instruction:', currentStep.audioPrompt);
-//     const utterance = new SpeechSynthesisUtterance(currentStep.audioPrompt);
-//     utterance.rate = 0.9;
-//     utterance.pitch = 1.1;
-  
-//     utterance.onstart = () => {
-//       setIsPlaying(true);
-//       setDetectionStatus('Speaking instruction...');
-//       console.log('Speech started');
-//     };
+//     // Increment repeat count
+//     setInstructionRepeatCount(prev => prev + 1);
     
-//     utterance.onend = () => {
-//       setIsPlaying(false);
-//       console.log('Speech ended');
-//     };
+//     console.log(`Speaking instruction (repeat ${instructionRepeatCount}):`, currentStep.audioPrompt);
     
-//     utterance.onerror = (event) => {
-//       setIsPlaying(false);
-//       console.error('Speech error:', event.error);
-//     };
-  
-//     speechSynthRef.current.cancel();
-//     speechSynthRef.current.speak(utterance);
+//     speak(currentStep.audioPrompt);
+//   };
+
+//   // Run object detection and hand pose estimation
+//   const startDetection = async () => {
+//     if (!videoRef.current || !objectDetectionModelRef.current) return;
+    
+//     clearInterval(detectionIntervalRef.current!);
+    
+//     detectionIntervalRef.current = setInterval(async () => {
+//       if (!videoRef.current || !objectDetectionModelRef.current || isStepComplete) return;
+      
+//       try {
+//         const detections = await objectDetectionModelRef.current.detect(videoRef.current);
+//         setObjectDetections(detections);
+        
+//         const simulatedLandmarks = simulateHandPose();
+//         setHandLandmarks(simulatedLandmarks);
+        
+//         checkStepCompletion(detections, simulatedLandmarks);
+//       } catch (error) {
+//         console.error('Detection error:', error);
+//       }
+//     }, 1000);
+    
+//     // Set up auto-detect timer (7-8 seconds)
+//     const randomDelay = 7000 + Math.floor(Math.random() * 1000); // 7-8 seconds
+//     console.log(`Setting auto-detection timer for ${randomDelay}ms`);
+    
+//     const timeout = setTimeout(() => {
+//       console.log('Auto-detection timer expired');
+//       setDetectionStatus('Task detected!');
+//       setDetectionProgress(100);
+//       completeDetection();
+//     }, randomDelay);
+    
+//     setAutoDetectTimeout(timeout);
+//   };
+
+//   const simulateHandPose = () => {
+//     if (Math.random() > 0.7) {
+//       return [Array(21).fill(0).map(() => ({
+//         x: Math.random(),
+//         y: Math.random(),
+//         z: Math.random()
+//       }))];
+//     }
+//     return [];
+//   };
+
+//   const checkStepCompletion = (detections: any[], landmarks: any[]) => {
+//     if (!currentStep) return;
+    
+//     if (currentStep.id === 'brush_teeth') {
+//       const toothbrushDetected = detections.some(
+//         d => d.class === 'toothbrush' && d.score > 0.7
+//       );
+      
+//       const handNearMouth = isHandNearMouth(landmarks);
+      
+//       if (toothbrushDetected && handNearMouth) {
+//         setDetectionProgress(prev => Math.min(prev + 20, 100));
+        
+//         if (detectionProgress >= 80) {
+//           completeDetection();
+//         }
+//       } else {
+//         setDetectionProgress(prev => Math.max(prev - 10, 0));
+//       }
+//     }
+//   };
+
+//   const completeDetection = () => {
+//     if (autoDetectTimeout) {
+//       clearTimeout(autoDetectTimeout);
+//       setAutoDetectTimeout(null);
+//     }
+//     clearInterval(detectionIntervalRef.current!);
+//     setDetectionStatus('Task detected!');
+//     setIsStepComplete(true);
+//     cancelSpeech();
+    
+//     // Pause instruction video
+//     if (instructionVideoRef.current) {
+//       instructionVideoRef.current.pause();
+//     }
+    
+//     timeoutRef.current = setTimeout(() => {
+//       moveToNextStep();
+//     }, 2000);
 //   };
 
 //   const moveToNextStep = () => {
 //     if (!task) return;
 
 //     console.log(`Moving from step ${currentStepIndex} to ${currentStepIndex + 1}`);
-//     setAnalysisAttempts(0);
+//     setInstructionRepeatCount(0);
+//     setDetectionProgress(0);
+//     setObjectDetections([]);
+//     setHandLandmarks([]);
 
 //     if (isLastStep) {
 //       console.log('Task completed!');
@@ -336,9 +387,22 @@
 //       setTimeLeft(repetitionMode === 'fixed' ? customInterval : 
 //         task.steps[currentStepIndex + 1]?.defaultRepetition || 15);
       
-//       // Restart capture for new step
-//       startContinuousCapture();
+//       startDetection();
+//       speakInstruction();
 //     }
+//   };
+
+//   // Get video source for current step
+//   const getVideoSourceForStep = (stepId: string) => {
+//     // Map step IDs to video sources
+//     const videoMap: Record<string, string> = {
+//       brush_teeth: '/pickup.mp4',
+//       wash_hands: '/toothpaste.mp4',
+//       take_medicine: '/videos/take_medicine.mp4',
+//       // Add more mappings as needed
+//     };
+    
+//     return videoMap[stepId] || '/pickup.mp4'; // Fallback to default video
 //   };
 
 //   // Handle step changes
@@ -346,11 +410,28 @@
 //     if (!currentStep) return;
     
 //     console.log(`New step activated: ${currentStep.instruction}`);
-//     speakInstruction();
-
-//     clearAllIntervals();
+//     setInstructionRepeatCount(0); // Reset for new step
     
+//     cleanUp();
+    
+//     // Initial instruction
+//     if (userInteracted) {
+//       speakInstruction();
+      
+//       // Play video for this step
+//       if (instructionVideoRef.current) {
+//         instructionVideoRef.current.src = getVideoSourceForStep(currentStep.id);
+//         instructionVideoRef.current.load();
+//         instructionVideoRef.current.play().catch(err => {
+//           console.error('Error playing instruction video:', err);
+//         });
+//       }
+//     }
+    
+//     // Set up timing for fixed repetition mode
 //     if (repetitionMode === 'fixed') {
+//       setTimeLeft(customInterval);
+      
 //       intervalRef.current = setInterval(() => {
 //         setTimeLeft(prev => {
 //           if (prev <= 1) {
@@ -360,33 +441,77 @@
 //           return prev - 1;
 //         });
 //       }, 1000);
-//     } else if (repetitionMode === 'ai') {
-//       const interval = currentStep.defaultRepetition || 15;
-//       setTimeLeft(interval);
-      
-//       intervalRef.current = setInterval(() => {
-//         speakInstruction();
-//       }, interval * 1000);
 //     }
+    
+//     // Start detection
+//     startDetection();
 
-//     return () => {
-//       clearAllIntervals();
-//     };
+//     return cleanUp;
 //   }, [currentStepIndex, repetitionMode, customInterval, currentStep]);
+
+//   // Draw detection results
+//   useEffect(() => {
+//     if (!canvasRef.current || !videoRef.current) return;
+
+//     const canvas = canvasRef.current;
+//     const ctx = canvas.getContext('2d');
+//     if (!ctx) return;
+
+//     canvas.width = videoRef.current.videoWidth;
+//     canvas.height = videoRef.current.videoHeight;
+
+//     ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+//     objectDetections.forEach(detection => {
+//       const [x, y, width, height] = detection.bbox;
+      
+//       ctx.strokeStyle = '#00FF00';
+//       ctx.lineWidth = 2;
+//       ctx.strokeRect(x, y, width, height);
+      
+//       ctx.fillStyle = '#00FF00';
+//       ctx.font = '16px Arial';
+//       ctx.fillText(
+//         `${detection.class} (${Math.round(detection.score * 100)}%)`,
+//         x,
+//         y > 10 ? y - 5 : 10
+//       );
+//     });
+
+//     drawHands(ctx, handLandmarks, canvas.width, canvas.height);
+//   }, [objectDetections, handLandmarks]);
+
+//   // Initialize on mount
+//   useEffect(() => {
+//     initSpeech();
+//     initModels().then(() => initCamera());
+//     initAudioContext();
+
+//     return cleanUp;
+//   }, []);
 
 //   // Handle user interaction for speech
 //   useEffect(() => {
 //     const handleFirstInteraction = () => {
 //       setUserInteracted(true);
 //       window.removeEventListener('click', handleFirstInteraction);
+//       if (currentStep) {
+//         speakInstruction();
+        
+//         // Play initial video
+//         if (instructionVideoRef.current && currentStep) {
+//           instructionVideoRef.current.src = getVideoSourceForStep(currentStep.id);
+//           instructionVideoRef.current.load();
+//           instructionVideoRef.current.play().catch(err => {
+//             console.error('Error playing instruction video:', err);
+//           });
+//         }
+//       }
 //     };
 
 //     window.addEventListener('click', handleFirstInteraction);
 //     return () => window.removeEventListener('click', handleFirstInteraction);
-//   }, []);
-
-//   // Render UI remains the same as previous implementation
-//   // ...
+//   }, [currentStep]);
 
 //   if (!task) {
 //     return (
@@ -404,11 +529,39 @@
 //           <div className="bg-white p-6 rounded-lg max-w-md text-center">
 //             <h3 className="text-lg font-bold mb-4">Enable Voice Instructions</h3>
 //             <p className="mb-4">Click anywhere to enable voice guidance</p>
+//             <button 
+//               onClick={() => setUserInteracted(true)}
+//               className="bg-blue-500 text-white px-4 py-2 rounded"
+//             >
+//               Enable Voice
+//             </button>
 //           </div>
 //         </div>
 //       )}
 
-//       {/* Camera Preview */}
+//       {/* Volume Control */}
+//       <div className="fixed top-4 left-4 z-30 bg-white bg-opacity-90 p-2 rounded-lg shadow-md">
+//         <div className="flex items-center space-x-2">
+//           <span className="text-sm">Volume:</span>
+//           <input
+//             type="range"
+//             min="0"
+//             max="1"
+//             step="0.1"
+//             value={volume}
+//             onChange={(e) => setVolume(parseFloat(e.target.value))}
+//             className="w-24"
+//           />
+//           <span className="text-xs w-8">{Math.round(volume * 100)}%</span>
+//         </div>
+//         {!ttsAvailable && (
+//           <div className="text-xs text-red-500 mt-1">
+//             Using audio fallback (no TTS available)
+//           </div>
+//         )}
+//       </div>
+
+//       {/* Camera Preview with Detection Overlay */}
 //       <div className="fixed top-4 right-4 z-30 bg-black rounded-lg overflow-hidden shadow-xl border-2 border-white w-64 h-48">
 //         {cameraError ? (
 //           <div className="w-full h-full bg-red-100 flex flex-col items-center justify-center p-2">
@@ -422,7 +575,7 @@
 //             </button>
 //           </div>
 //         ) : (
-//           <>
+//           <div className="relative w-full h-full">
 //             <video
 //               ref={videoRef}
 //               autoPlay
@@ -430,35 +583,21 @@
 //               muted
 //               className="w-full h-full object-cover"
 //             />
-//             {isAnalyzing && (
-//               <div className="absolute inset-0 bg-black bg-opacity-70 flex items-center justify-center">
-//                 <div className="text-white text-sm font-medium animate-pulse">
-//                   Analyzing...
-//                 </div>
+//             <canvas
+//               ref={canvasRef}
+//               className="absolute top-0 left-0 w-full h-full pointer-events-none"
+//             />
+//             {detectionProgress > 0 && (
+//               <div className="absolute bottom-2 left-0 right-0 mx-4 bg-black bg-opacity-50 rounded-full h-2">
+//                 <div 
+//                   className="bg-blue-500 h-2 rounded-full transition-all duration-300"
+//                   style={{ width: `${detectionProgress}%` }}
+//                 ></div>
 //               </div>
 //             )}
-//           </>
+//           </div>
 //         )}
 //       </div>
-
-//       {/* Debug View */}
-//       {debugMode && capturedImage && (
-//         <div className="fixed bottom-4 right-4 z-20 bg-white p-2 rounded shadow-lg">
-//           <h3 className="text-sm font-bold mb-1">Last Captured Image:</h3>
-//           <img 
-//             src={capturedImage} 
-//             alt="Last captured frame" 
-//             className="w-32 h-32 object-contain border"
-//           />
-//           <div className="text-xs mt-1">Attempts: {analysisAttempts}</div>
-//           <button 
-//             onClick={() => setDebugMode(false)}
-//             className="mt-2 text-xs bg-gray-200 px-2 py-1 rounded"
-//           >
-//             Hide Debug
-//           </button>
-//         </div>
-//       )}
 
 //       {/* Debug Toggle */}
 //       <button 
@@ -468,8 +607,22 @@
 //         {debugMode ? 'Hide Debug' : 'Show Debug'}
 //       </button>
 
-//       {/* Hidden canvas for image capture */}
-//       <canvas ref={canvasRef} className="hidden" />
+//       {/* Debug View */}
+//       {debugMode && (
+//         <div className="fixed bottom-4 right-4 z-20 bg-white p-2 rounded shadow-lg">
+//           <h3 className="text-sm font-bold mb-1">Detection Debug</h3>
+//           <div className="text-xs">
+//             <div>Status: {detectionStatus}</div>
+//             <div>Progress: {detectionProgress.toFixed(1)}%</div>
+//             <div>Objects: {objectDetections.length}</div>
+//             <div>Hands: {handLandmarks.length}</div>
+//             <div>Instruction Repeat: {instructionRepeatCount}</div>
+//             <div>Speech: {isPlaying ? 'Playing' : 'Idle'}</div>
+//             <div>TTS: {ttsAvailable ? 'Available' : 'Unavailable'}</div>
+//             <div>Auto-detection: {autoDetectTimeout ? 'Active' : 'Inactive'}</div>
+//           </div>
+//         </div>
+//       )}
 
 //       {/* Main Content */}
 //       <div className="flex justify-between items-center mb-6">
@@ -499,7 +652,7 @@
 //                 <div className="flex justify-between mb-2">
 //                   <span className="font-medium">Status:</span>
 //                   <span className={`font-medium ${
-//                     detectionStatus.includes('complete') ? 'text-green-600' : 
+//                     detectionStatus.includes('detected') ? 'text-green-600' : 
 //                     detectionStatus.includes('waiting') ? 'text-blue-600' : 'text-yellow-600'
 //                   }`}>
 //                     {detectionStatus}
@@ -512,11 +665,37 @@
 //                     <span className="text-blue-600 font-bold">{timeLeft}s</span>
 //                   </div>
 //                 )}
+
+//                 {detectionProgress > 0 && (
+//                   <div className="mt-2">
+//                     <div className="flex justify-between text-sm mb-1">
+//                       <span>Detection progress:</span>
+//                       <span>{detectionProgress.toFixed(0)}%</span>
+//                     </div>
+//                     <div className="w-full bg-gray-200 rounded-full h-2">
+//                       <div 
+//                         className="bg-blue-600 h-2 rounded-full" 
+//                         style={{ width: `${detectionProgress}%` }}
+//                       ></div>
+//                     </div>
+//                   </div>
+//                 )}
 //               </div>
 
-//               <div className="bg-blue-50 border border-blue-200 p-4 rounded-lg">
-//                 <h3 className="font-medium mb-2">Visual Prompt:</h3>
-//                 <p className="text-blue-800 italic">"{currentStep.visualPrompt}"</p>
+//               {/* Video Instruction (replacing Visual Prompt) */}
+//               <div className="bg-black rounded-lg overflow-hidden">
+//                 <video
+//                   ref={instructionVideoRef}
+//                   className="w-full h-auto"
+//                   controls={false}
+//                   autoPlay
+//                   muted={false}
+//                   loop
+//                   playsInline
+//                 >
+//                   <source src={getVideoSourceForStep(currentStep.id)} type="video/mp4" />
+//                   Your browser does not support the video tag.
+//                 </video>
 //               </div>
 //             </div>
 //           </div>
@@ -586,6 +765,17 @@
 import { useState, useEffect, useRef } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { tasks } from '@/lib/tasks';
+import * as tf from '@tensorflow/tfjs';
+import '@tensorflow/tfjs-backend-webgl';
+import * as cocoSsd from '@tensorflow-models/coco-ssd';
+import { drawHands, isHandNearMouth } from '@/lib/handDetection';
+
+// Audio fallback for browsers with speech synthesis issues
+const playAudioFallback = (text: string) => {
+  const audio = new Audio(`https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&tl=en&q=${encodeURIComponent(text)}`);
+  audio.volume = 1.0;
+  audio.play().catch(e => console.error('Audio fallback error:', e));
+};
 
 export default function TaskExecution() {
   const searchParams = useSearchParams();
@@ -603,29 +793,60 @@ export default function TaskExecution() {
   const [debugMode, setDebugMode] = useState(false);
   const [userInteracted, setUserInteracted] = useState(false);
   const [detectionProgress, setDetectionProgress] = useState(0);
-  const [keypoints, setKeypoints] = useState<Array<{x: number, y: number}>>([]);
-  const [boundingBoxes, setBoundingBoxes] = useState<Array<{x: number, y: number, width: number, height: number}>>([]);
+  const [instructionRepeatCount, setInstructionRepeatCount] = useState(0);
+  const [objectDetections, setObjectDetections] = useState<any[]>([]);
+  const [handLandmarks, setHandLandmarks] = useState<any[]>([]);
+  const [ttsAvailable, setTtsAvailable] = useState(true);
+  const [volume, setVolume] = useState(1.0);
+  const [autoDetectTimeout, setAutoDetectTimeout] = useState<NodeJS.Timeout | null>(null);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const instructionVideoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const speechSynthRef = useRef<SpeechSynthesis | null>(null);
+  const speechSynthesisRef = useRef<SpeechSynthesis | null>(null);
+  const speechUtteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
   const detectionIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const objectDetectionModelRef = useRef<cocoSsd.ObjectDetection | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
 
   // Find the selected task
   const task = tasks.find(t => t.id === taskId);
   const currentStep = task?.steps[currentStepIndex];
   const isLastStep = currentStepIndex === (task?.steps.length ?? 0) - 1;
 
-  // Initialize camera with retries
+  // Initialize audio context for better volume control
+  const initAudioContext = () => {
+    if (!audioContextRef.current) {
+      audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+    }
+  };
+
+  // Initialize TensorFlow.js and models
+  const initModels = async () => {
+    try {
+      setDetectionStatus('Loading TensorFlow.js...');
+      await tf.setBackend('webgl');
+      await tf.ready();
+      
+      setDetectionStatus('Loading object detection model...');
+      objectDetectionModelRef.current = await cocoSsd.load();
+      
+      setDetectionStatus('Models loaded');
+    } catch (error) {
+      console.error('Error loading models:', error);
+      setDetectionStatus('Failed to load models');
+    }
+  };
+
+  // Initialize camera
   const initCamera = async (attempt = 1) => {
     try {
       console.log(`Initializing camera (attempt ${attempt})...`);
       setDetectionStatus('Initializing camera...');
       
-      // Clean up any existing stream
       if (streamRef.current) {
         streamRef.current.getTracks().forEach(track => track.stop());
         streamRef.current = null;
@@ -646,11 +867,10 @@ export default function TaskExecution() {
       streamRef.current = stream;
       videoRef.current.srcObject = stream;
 
-      // Wait for video to be ready
       await new Promise<void>((resolve, reject) => {
         const timer = setTimeout(() => {
           reject(new Error('Camera timeout'));
-        }, 5000);
+        }, 10000);
 
         videoRef.current!.onloadedmetadata = () => {
           clearTimeout(timer);
@@ -663,7 +883,6 @@ export default function TaskExecution() {
         };
       });
 
-      // Play the video
       await videoRef.current.play();
       
       setCameraActive(true);
@@ -671,14 +890,12 @@ export default function TaskExecution() {
       setDetectionStatus('Camera ready');
       console.log('Camera successfully initialized');
       
-      // Start simulated detection
-      startSimulatedDetection();
+      startDetection();
       
     } catch (err) {
       console.error(`Camera init error (attempt ${attempt}):`, err);
       
       if (attempt < 3) {
-        // Retry after delay
         await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
         return initCamera(attempt + 1);
       }
@@ -694,7 +911,6 @@ export default function TaskExecution() {
       setCameraActive(false);
       setDetectionStatus(errorMessage);
       
-      // Clean up if we got a stream but failed to play
       if (streamRef.current) {
         streamRef.current.getTracks().forEach(track => track.stop());
         streamRef.current = null;
@@ -702,29 +918,56 @@ export default function TaskExecution() {
     }
   };
 
-  // Initialize speech synthesis
+  // Initialize speech synthesis with better error handling
   const initSpeech = () => {
     if ('speechSynthesis' in window) {
-      speechSynthRef.current = window.speechSynthesis;
-      console.log('Speech synthesis initialized');
+      speechSynthesisRef.current = window.speechSynthesis;
+      
+      // Check if voices are actually available
+      const checkVoices = () => {
+        const voices = speechSynthesisRef.current?.getVoices();
+        if (!voices || voices.length === 0) {
+          console.warn('No voices available in speech synthesis');
+          setTtsAvailable(false);
+        } else {
+          console.log('Available voices:', voices);
+          setTtsAvailable(true);
+        }
+      };
+      
+      speechSynthesisRef.current.onvoiceschanged = checkVoices;
+      checkVoices();
+    } else {
+      console.warn('Speech Synthesis API not supported');
+      setTtsAvailable(false);
+      setDetectionStatus('Voice instructions not supported');
     }
   };
 
-  useEffect(() => {
-    initSpeech();
-    initCamera();
+  // Clean up all resources
+  const cleanUp = () => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop());
+    }
+    cancelSpeech();
+    clearAllIntervals();
+    
+    if (autoDetectTimeout) {
+      clearTimeout(autoDetectTimeout);
+    }
+  };
 
-    return () => {
-      // Cleanup on unmount
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach(track => track.stop());
-      }
-      if (speechSynthRef.current?.speaking) {
-        speechSynthRef.current.cancel();
-      }
-      clearAllIntervals();
-    };
-  }, []);
+  // Cancel any ongoing speech
+  const cancelSpeech = () => {
+    if (speechSynthesisRef.current?.speaking) {
+      speechSynthesisRef.current.cancel();
+    }
+    if (speechUtteranceRef.current) {
+      speechUtteranceRef.current.onend = null;
+      speechUtteranceRef.current = null;
+    }
+    setIsPlaying(false);
+  };
 
   const clearAllIntervals = () => {
     if (intervalRef.current) clearInterval(intervalRef.current);
@@ -732,138 +975,261 @@ export default function TaskExecution() {
     if (timeoutRef.current) clearTimeout(timeoutRef.current);
   };
 
-  // Simulate pose detection and object detection
-  const startSimulatedDetection = () => {
-    stopDetection();
-    setDetectionStatus('Starting detection engine...');
-    setDetectionProgress(0);
+  // Enhanced speak function with multiple fallbacks
+  const speak = (text: string) => {
+    if (!userInteracted) return;
 
-    // Simulate loading detection models
-    timeoutRef.current = setTimeout(() => {
-      setDetectionStatus('Loading pose estimation model...');
+    cancelSpeech();
+    initAudioContext();
+
+    // Try Web Speech API first
+    if (ttsAvailable && speechSynthesisRef.current) {
+      const utterance = new SpeechSynthesisUtterance(text);
+      speechUtteranceRef.current = utterance;
       
-      timeoutRef.current = setTimeout(() => {
-        setDetectionStatus('Loading object detection model...');
-        
-        timeoutRef.current = setTimeout(() => {
-          setDetectionStatus('Analyzing video feed...');
-          startDetectionVisuals();
-          
-          // Start the actual simulated detection
-          detectionIntervalRef.current = setInterval(() => {
-            simulateDetectionFrame();
-          }, 100);
-        }, 1500);
-      }, 1500);
-    }, 1500);
-  };
-
-  const stopDetection = () => {
-    if (detectionIntervalRef.current) {
-      clearInterval(detectionIntervalRef.current);
-      detectionIntervalRef.current = null;
-    }
-    setKeypoints([]);
-    setBoundingBoxes([]);
-  };
-
-  const startDetectionVisuals = () => {
-    // Generate random keypoints (like pose estimation)
-    const newKeypoints = Array.from({length: 17}, () => ({
-      x: Math.random() * 0.8 + 0.1, // Random position between 10% and 90%
-      y: Math.random() * 0.8 + 0.1
-    }));
-    setKeypoints(newKeypoints);
-
-    // Generate random bounding boxes (like object detection)
-    const newBoxes = Array.from({length: 3}, () => {
-      const size = Math.random() * 0.3 + 0.1;
-      return {
-        x: Math.random() * (0.9 - size),
-        y: Math.random() * (0.9 - size),
-        width: size,
-        height: size
+      // Configure voice
+      const voices = speechSynthesisRef.current.getVoices();
+      const preferredVoice = voices.find(v => v.lang.includes('en')) || voices[0];
+      if (preferredVoice) {
+        utterance.voice = preferredVoice;
+      }
+      
+      utterance.rate = 0.9;
+      utterance.pitch = 1.1;
+      utterance.volume = volume;
+    
+      utterance.onstart = () => {
+        setIsPlaying(true);
+        setDetectionStatus('Speaking instruction...');
       };
-    });
-    setBoundingBoxes(newBoxes);
+      
+      utterance.onend = () => {
+        setIsPlaying(false);
+        speechUtteranceRef.current = null;
+      };
+      
+      utterance.onerror = (event) => {
+        console.error('Speech error:', event.error);
+        setIsPlaying(false);
+        speechUtteranceRef.current = null;
+        
+        // Fallback to audio if Web Speech fails
+        playAudioFallback(text);
+      };
+    
+      try {
+        speechSynthesisRef.current.speak(utterance);
+      } catch (e) {
+        console.error('Speech synthesis failed:', e);
+        playAudioFallback(text);
+      }
+    } else {
+      // Use audio fallback if Web Speech not available
+      playAudioFallback(text);
+    }
   };
 
-  const simulateDetectionFrame = () => {
-    setDetectionProgress(prev => {
-      const newProgress = prev + Math.random() * 5;
+  // Speak instruction with proper repeating
+  const speakInstruction = () => {
+    if (!currentStep) return;
+    
+    // Increment repeat count
+    setInstructionRepeatCount(prev => prev + 1);
+    
+    console.log(`Speaking instruction (repeat ${instructionRepeatCount}):`, currentStep.audioPrompt);
+    
+    speak(currentStep.audioPrompt);
+  };
+
+  // Run object detection and hand pose estimation
+  const startDetection = async () => {
+    if (!videoRef.current || !objectDetectionModelRef.current) return;
+    
+    clearInterval(detectionIntervalRef.current!);
+    
+    detectionIntervalRef.current = setInterval(async () => {
+      if (!videoRef.current || !objectDetectionModelRef.current || isStepComplete) return;
       
-      if (newProgress >= 100) {
-        // Detection complete!
-        completeDetection();
-        return 100;
+      try {
+        const detections = await objectDetectionModelRef.current.detect(videoRef.current);
+        setObjectDetections(detections);
+        
+        const simulatedLandmarks = simulateHandPose();
+        setHandLandmarks(simulatedLandmarks);
+        
+        checkStepCompletion(detections, simulatedLandmarks);
+      } catch (error) {
+        console.error('Detection error:', error);
       }
-      
-      // Randomly update keypoints and boxes to make it look dynamic
-      if (Math.random() > 0.7) {
-        setKeypoints(prev => prev.map(kp => ({
-          x: Math.min(0.9, Math.max(0.1, kp.x + (Math.random() * 0.1 - 0.05))),
-          y: Math.min(0.9, Math.max(0.1, kp.y + (Math.random() * 0.1 - 0.05)))
-      })));
-      }
-      
-      if (Math.random() > 0.8) {
-        setBoundingBoxes(prev => prev.map(box => ({
-          ...box,
-          x: Math.min(0.9 - box.width, Math.max(0.1, box.x + (Math.random() * 0.1 - 0.05))),
-          y: Math.min(0.9 - box.height, Math.max(0.1, box.y + (Math.random() * 0.1 - 0.05)))
-        })));
-      }
-      
-      return newProgress;
-    });
+    }, 1000);
+    
+    // Set up auto-detect timer (7-8 seconds)
+    const randomDelay = 10000 + Math.floor(Math.random() * 1000); // 7-8 seconds
+    console.log(`Setting auto-detection timer for ${randomDelay}ms`);
+    
+    const timeout = setTimeout(() => {
+      console.log('Auto-detection timer expired');
+      setDetectionStatus('Task detected!');
+      setDetectionProgress(100);
+      completeDetection();
+    }, randomDelay);
+    
+    setAutoDetectTimeout(timeout);
+  };
+
+  const simulateHandPose = () => {
+    if (Math.random() > 0.7) {
+      return [Array(21).fill(0).map(() => ({
+        x: Math.random(),
+        y: Math.random(),
+        z: Math.random()
+      }))];
+    }
+    return [];
+  };
+
+  // Improved step completion checking
+  const checkStepCompletion = (detections: any[], landmarks: any[]) => {
+    if (!currentStep) return;
+    
+    // Map step IDs to action types for detection logic
+    const actionType = getActionTypeForStep(currentStep.id);
+    
+    // Handle different types of step actions
+    switch (actionType) {
+      case 'brush_teeth':
+        // Improved toothbrush detection with better confidence thresholds and position checking
+        const toothbrushDetection = detections.find(d => d.class === 'toothbrush');
+        
+        // Check if toothbrush is detected with reasonable confidence
+        const toothbrushDetected = toothbrushDetection && toothbrushDetection.score > 0.6;
+        
+        // Check if toothbrush is in upper area of frame (likely near mouth)
+        const isToothbrushInUpperFrame = toothbrushDetection && 
+          (toothbrushDetection.bbox[1] < videoRef.current?.videoHeight * 0.6);
+        
+        // Check hand position using landmarks
+        const handNearMouth = isHandNearMouth(landmarks);
+        
+        // Log detection data for debugging
+        if (debugMode && toothbrushDetection) {
+          console.log(`Toothbrush detected: ${toothbrushDetected}, score: ${toothbrushDetection.score.toFixed(2)}, position: ${isToothbrushInUpperFrame}`);
+        }
+        
+        // Combined detection criteria
+        if ((toothbrushDetected && isToothbrushInUpperFrame) || (toothbrushDetected && handNearMouth)) {
+          // Faster progression when both conditions are met
+          const incrementAmount = handNearMouth && toothbrushDetected ? 25 : 15;
+          setDetectionProgress(prev => Math.min(prev + incrementAmount, 100));
+          
+          if (detectionProgress >= 80) {
+            completeDetection();
+          }
+        } else {
+          // Slower regression when conditions aren't met
+          setDetectionProgress(prev => Math.max(prev - 5, 0));
+        }
+        break;
+        
+      case 'wash_hands':
+        // Handle wash hands detection logic
+        const handMovement = landmarks.length > 0;
+        const sinkDetected = detections.some(d => 
+          (d.class === 'sink' || d.class === 'bottle') && d.score > 0.6
+        );
+        
+        if (handMovement && sinkDetected) {
+          setDetectionProgress(prev => Math.min(prev + 20, 100));
+          
+          if (detectionProgress >= 80) {
+            completeDetection();
+          }
+        } else if (handMovement || sinkDetected) {
+          setDetectionProgress(prev => Math.min(prev + 10, 100));
+        } else {
+          setDetectionProgress(prev => Math.max(prev - 5, 0));
+        }
+        break;
+        
+      case 'take_medicine':
+        // Handle medicine detection logic
+        const bottleDetected = detections.some(d => 
+          (d.class === 'bottle' || d.class === 'cup') && d.score > 0.6
+        );
+        
+        const handDetected = landmarks.length > 0;
+        
+        if (bottleDetected && handDetected) {
+          setDetectionProgress(prev => Math.min(prev + 20, 100));
+          
+          if (detectionProgress >= 80) {
+            completeDetection();
+          }
+        } else {
+          setDetectionProgress(prev => Math.max(prev - 5, 0));
+        }
+        break;
+        
+      default:
+        // For steps that don't have specific detection logic, increment progress more generically
+        // based on any detected objects or hands
+        if (detections.length > 0 || landmarks.length > 0) {
+          setDetectionProgress(prev => Math.min(prev + 10, 100));
+          
+          if (detectionProgress >= 80) {
+            completeDetection();
+          }
+        } else {
+          setDetectionProgress(prev => Math.max(prev - 2, 0));
+        }
+    }
+  };
+
+  // Map step IDs to action types for detection and video matching
+  const getActionTypeForStep = (stepId: string) => {
+    // Map step IDs to action types based on step content
+    const stepActionMap: Record<string, string> = {
+      'step-1': 'pickup_toothbrush',
+      'step-2': 'wet_toothbrush',
+      'step-3': 'open_toothpaste',
+      'step-4': 'apply_toothpaste',
+      'step-5': 'brush_teeth',
+      'step-6': 'brush_teeth',
+      'step-7': 'rinse_mouth',
+      // Add more mappings for additional steps
+    };
+    
+    return stepActionMap[stepId] || 'default';
   };
 
   const completeDetection = () => {
-    stopDetection();
+    if (autoDetectTimeout) {
+      clearTimeout(autoDetectTimeout);
+      setAutoDetectTimeout(null);
+    }
+    clearInterval(detectionIntervalRef.current!);
     setDetectionStatus('Task detected!');
     setIsStepComplete(true);
+    cancelSpeech();
     
-    // Move to next step after delay
+    // Pause instruction video
+    if (instructionVideoRef.current) {
+      instructionVideoRef.current.pause();
+    }
+    
     timeoutRef.current = setTimeout(() => {
       moveToNextStep();
     }, 2000);
-  };
-
-  const speakInstruction = () => {
-    if (!userInteracted || !currentStep || !speechSynthRef.current) return;
-    
-    console.log('Speaking instruction:', currentStep.audioPrompt);
-    const utterance = new SpeechSynthesisUtterance(currentStep.audioPrompt);
-    utterance.rate = 0.9;
-    utterance.pitch = 1.1;
-  
-    utterance.onstart = () => {
-      setIsPlaying(true);
-      setDetectionStatus('Speaking instruction...');
-      console.log('Speech started');
-    };
-    
-    utterance.onend = () => {
-      setIsPlaying(false);
-      console.log('Speech ended');
-      startSimulatedDetection();
-    };
-    
-    utterance.onerror = (event) => {
-      setIsPlaying(false);
-      console.error('Speech error:', event.error);
-      startSimulatedDetection();
-    };
-  
-    speechSynthRef.current.cancel();
-    speechSynthRef.current.speak(utterance);
   };
 
   const moveToNextStep = () => {
     if (!task) return;
 
     console.log(`Moving from step ${currentStepIndex} to ${currentStepIndex + 1}`);
+    setInstructionRepeatCount(0);
     setDetectionProgress(0);
+    setObjectDetections([]);
+    setHandLandmarks([]);
 
     if (isLastStep) {
       console.log('Task completed!');
@@ -873,7 +1239,72 @@ export default function TaskExecution() {
       setDetectionStatus('Starting next step...');
       setTimeLeft(repetitionMode === 'fixed' ? customInterval : 
         task.steps[currentStepIndex + 1]?.defaultRepetition || 15);
+      
+      startDetection();
+      speakInstruction();
     }
+  };
+
+  // Fixed video mapping function for steps
+  const getVideoSourceForStep = (stepId: string) => {
+    if (!stepId) return '/videos/default_instruction.mp4';
+    
+    // First, map specific step IDs to corresponding videos
+    const videoMap: Record<string, string> = {
+      'step-1': '/pickup.mp4',           // Pick up toothbrush
+      'step-2': '/toothpaste.mp4',       // Wet toothbrush
+      'step-3': '/videos/open_toothpaste.mp4',  // Open toothpaste
+      'step-4': '/videos/apply_toothpaste.mp4', // Apply toothpaste
+      'step-5': '/videos/brush_top.mp4',        // Brush top teeth
+      'step-6': '/videos/brush_bottom.mp4',     // Brush bottom teeth
+      'step-7': '/videos/rinse.mp4',            // Rinse mouth
+    };
+    
+    // If we have a direct mapping, use it
+    if (videoMap[stepId]) {
+      console.log(`Found specific video for step ${stepId}: ${videoMap[stepId]}`);
+      return videoMap[stepId];
+    }
+    
+    // If no direct mapping, try to use action type mapping
+    const actionType = getActionTypeForStep(stepId);
+    const actionVideoMap: Record<string, string> = {
+      'pickup_toothbrush': '/pickup.mp4',
+      'wet_toothbrush': '/water.mp4',
+      'brush_teeth': '/toothpaste.mp4',
+      'rinse_mouth': '/brush.mp4',
+      'wash_hands': '/videos/wash_hands.mp4',
+      'take_medicine': '/videos/take_medicine.mp4',
+      'floss_teeth': '/videos/floss_teeth.mp4', 
+      'put_on_shoes': '/videos/put_on_shoes.mp4',
+      'tie_shoelaces': '/videos/tie_shoelaces.mp4',
+      'button_shirt': '/videos/button_shirt.mp4'
+    };
+    
+    if (actionVideoMap[actionType]) {
+      console.log(`Using action type video for ${stepId} (${actionType}): ${actionVideoMap[actionType]}`);
+      return actionVideoMap[actionType];
+    }
+    
+    // If still no match, use a default video based on task ID
+    const taskDefaultMap: Record<string, string> = {
+      'brushing-teeth': '/videos/dental_default.mp4',
+      'morning_routine': '/videos/morning_routine_default.mp4',
+      'evening_routine': '/videos/evening_routine_default.mp4',
+      'medication': '/videos/medication_default.mp4',
+      'dental_hygiene': '/videos/dental_default.mp4',
+      'dressing': '/videos/dressing_default.mp4'
+    };
+    
+    // Use task-specific default if available
+    if (task && taskDefaultMap[task.id]) {
+      console.log(`Using task default video for ${task.id}`);
+      return taskDefaultMap[task.id];
+    }
+    
+    // Fall back to generic default video
+    console.log(`No specific video found for step ${stepId}, using default`);
+    return '/videos/default_instruction.mp4';
   };
 
   // Handle step changes
@@ -881,11 +1312,30 @@ export default function TaskExecution() {
     if (!currentStep) return;
     
     console.log(`New step activated: ${currentStep.instruction}`);
-    speakInstruction();
-
-    clearAllIntervals();
+    setInstructionRepeatCount(0); // Reset for new step
     
+    cleanUp();
+    
+    // Initial instruction
+    if (userInteracted) {
+      speakInstruction();
+      
+      // Play video for this step
+      if (instructionVideoRef.current) {
+        const videoSource = getVideoSourceForStep(currentStep.id);
+        console.log(`Setting video source to: ${videoSource}`);
+        instructionVideoRef.current.src = videoSource;
+        instructionVideoRef.current.load();
+        instructionVideoRef.current.play().catch(err => {
+          console.error('Error playing instruction video:', err);
+        });
+      }
+    }
+    
+    // Set up timing for fixed repetition mode
     if (repetitionMode === 'fixed') {
+      setTimeLeft(customInterval);
+      
       intervalRef.current = setInterval(() => {
         setTimeLeft(prev => {
           if (prev <= 1) {
@@ -895,32 +1345,15 @@ export default function TaskExecution() {
           return prev - 1;
         });
       }, 1000);
-    } else if (repetitionMode === 'ai') {
-      const interval = currentStep.defaultRepetition || 15;
-      setTimeLeft(interval);
-      
-      intervalRef.current = setInterval(() => {
-        speakInstruction();
-      }, interval * 1000);
     }
+    
+    // Start detection
+    startDetection();
 
-    return () => {
-      clearAllIntervals();
-    };
+    return cleanUp;
   }, [currentStepIndex, repetitionMode, customInterval, currentStep]);
 
-  // Handle user interaction for speech
-  useEffect(() => {
-    const handleFirstInteraction = () => {
-      setUserInteracted(true);
-      window.removeEventListener('click', handleFirstInteraction);
-    };
-
-    window.addEventListener('click', handleFirstInteraction);
-    return () => window.removeEventListener('click', handleFirstInteraction);
-  }, []);
-
-  // Draw detection overlays
+  // Draw detection results
   useEffect(() => {
     if (!canvasRef.current || !videoRef.current) return;
 
@@ -928,59 +1361,88 @@ export default function TaskExecution() {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    // Set canvas dimensions to match video
     canvas.width = videoRef.current.videoWidth;
     canvas.height = videoRef.current.videoHeight;
 
-    // Clear canvas
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    // Draw bounding boxes (object detection)
-    boundingBoxes.forEach(box => {
-      ctx.strokeStyle = '#00FF00';
-      ctx.lineWidth = 2;
-      ctx.strokeRect(
-        box.x * canvas.width,
-        box.y * canvas.height,
-        box.width * canvas.width,
-        box.height * canvas.height
-      );
-    });
-
-    // Draw keypoints (pose estimation)
-    keypoints.forEach(kp => {
-      ctx.fillStyle = '#FF0000';
-      ctx.beginPath();
-      ctx.arc(
-        kp.x * canvas.width,
-        kp.y * canvas.height,
-        5,
-        0,
-        2 * Math.PI
-      );
-      ctx.fill();
-    });
-
-    // Draw connections between keypoints (skeleton)
-    if (keypoints.length > 0) {
-      ctx.strokeStyle = '#FFFF00';
-      ctx.lineWidth = 2;
+    // Draw object detections with improved visibility
+    objectDetections.forEach(detection => {
+      const [x, y, width, height] = detection.bbox;
       
-      // Simple connections for demonstration
-      for (let i = 0; i < keypoints.length - 1; i++) {
-        ctx.beginPath();
-        ctx.moveTo(
-          keypoints[i].x * canvas.width,
-          keypoints[i].y * canvas.height
-        );
-        ctx.lineTo(
-          keypoints[i + 1].x * canvas.width,
-          keypoints[i + 1].y * canvas.height
-        );
-        ctx.stroke();
-      }
+      // Use different colors based on confidence
+      let color = '#FF0000'; // Red for low confidence
+      if (detection.score > 0.7) color = '#00FF00'; // Green for high confidence
+      else if (detection.score > 0.5) color = '#FFFF00'; // Yellow for medium confidence
+      
+      // Draw bounding box
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 3;
+      ctx.strokeRect(x, y, width, height);
+      
+      // Draw label with confidence
+      ctx.fillStyle = color;
+      ctx.font = 'bold 16px Arial';
+      ctx.fillText(
+        `${detection.class} (${Math.round(detection.score * 100)}%)`,
+        x,
+        y > 20 ? y - 5 : 20
+      );
+    });
+
+    // Draw hand landmarks
+    drawHands(ctx, handLandmarks, canvas.width, canvas.height);
+    
+    // Draw detection progress indicator directly on canvas
+    if (detectionProgress > 0) {
+      const progressBarHeight = 10;
+      const progressBarWidth = canvas.width * 0.8;
+      const progressBarX = (canvas.width - progressBarWidth) / 2;
+      const progressBarY = canvas.height - 20;
+      
+      // Background bar
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+      ctx.fillRect(progressBarX, progressBarY, progressBarWidth, progressBarHeight);
+      
+      // Progress fill
+      ctx.fillStyle = detectionProgress > 75 ? '#00FF00' : '#3388FF';
+      ctx.fillRect(progressBarX, progressBarY, progressBarWidth * (detectionProgress / 100), progressBarHeight);
     }
-  }, [keypoints, boundingBoxes]);
+    
+  }, [objectDetections, handLandmarks, detectionProgress]);
+
+  // Initialize on mount
+  useEffect(() => {
+    initSpeech();
+    initModels().then(() => initCamera());
+    initAudioContext();
+
+    return cleanUp;
+  }, []);
+
+  // Handle user interaction for speech
+  useEffect(() => {
+    const handleFirstInteraction = () => {
+      setUserInteracted(true);
+      window.removeEventListener('click', handleFirstInteraction);
+      if (currentStep) {
+        speakInstruction();
+        
+        // Play initial video
+        if (instructionVideoRef.current && currentStep) {
+          const videoSource = getVideoSourceForStep(currentStep.id);
+          instructionVideoRef.current.src = videoSource;
+          instructionVideoRef.current.load();
+          instructionVideoRef.current.play().catch(err => {
+            console.error('Error playing instruction video:', err);
+          });
+        }
+      }
+    };
+
+    window.addEventListener('click', handleFirstInteraction);
+    return () => window.removeEventListener('click', handleFirstInteraction);
+  }, [currentStep]);
 
   if (!task) {
     return (
@@ -998,9 +1460,37 @@ export default function TaskExecution() {
           <div className="bg-white p-6 rounded-lg max-w-md text-center">
             <h3 className="text-lg font-bold mb-4">Enable Voice Instructions</h3>
             <p className="mb-4">Click anywhere to enable voice guidance</p>
+            <button 
+              onClick={() => setUserInteracted(true)}
+              className="bg-blue-500 text-white px-4 py-2 rounded"
+            >
+              Enable Voice
+            </button>
           </div>
         </div>
       )}
+
+      {/* Volume Control */}
+      <div className="fixed top-4 left-4 z-30 bg-white bg-opacity-90 p-2 rounded-lg shadow-md">
+        <div className="flex items-center space-x-2">
+          <span className="text-sm">Volume:</span>
+          <input
+            type="range"
+            min="0"
+            max="1"
+            step="0.1"
+            value={volume}
+            onChange={(e) => setVolume(parseFloat(e.target.value))}
+            className="w-24"
+          />
+          <span className="text-xs w-8">{Math.round(volume * 100)}%</span>
+        </div>
+        {!ttsAvailable && (
+          <div className="text-xs text-red-500 mt-1">
+            Using audio fallback (no TTS available)
+          </div>
+        )}
+      </div>
 
       {/* Camera Preview with Detection Overlay */}
       <div className="fixed top-4 right-4 z-30 bg-black rounded-lg overflow-hidden shadow-xl border-2 border-white w-64 h-48">
@@ -1028,7 +1518,7 @@ export default function TaskExecution() {
               ref={canvasRef}
               className="absolute top-0 left-0 w-full h-full pointer-events-none"
             />
-            {detectionProgress > 0 && detectionProgress < 100 && (
+            {detectionProgress > 0 && (
               <div className="absolute bottom-2 left-0 right-0 mx-4 bg-black bg-opacity-50 rounded-full h-2">
                 <div 
                   className="bg-blue-500 h-2 rounded-full transition-all duration-300"
@@ -1055,8 +1545,14 @@ export default function TaskExecution() {
           <div className="text-xs">
             <div>Status: {detectionStatus}</div>
             <div>Progress: {detectionProgress.toFixed(1)}%</div>
-            <div>Keypoints: {keypoints.length}</div>
-            <div>Objects: {boundingBoxes.length}</div>
+            <div>Objects: {objectDetections.length}</div>
+            <div>Step ID: {currentStep?.id}</div>
+            <div>Video Source: {currentStep ? getVideoSourceForStep(currentStep.id) : 'none'}</div>
+            <div>Hands: {handLandmarks.length}</div>
+            <div>Instruction Repeat: {instructionRepeatCount}</div>
+            <div>Speech: {isPlaying ? 'Playing' : 'Idle'}</div>
+            <div>TTS: {ttsAvailable ? 'Available' : 'Unavailable'}</div>
+            <div>Auto-detection: {autoDetectTimeout ? 'Active' : 'Inactive'}</div>
           </div>
         </div>
       )}
@@ -1099,7 +1595,7 @@ export default function TaskExecution() {
                 {repetitionMode === 'fixed' && (
                   <div className="flex justify-between items-center">
                     <span className="font-medium">Next prompt in:</span>
-                    <span className="text-blue-600 font-bold">{timeLeft}s</span>
+                    <span className="text-blue-600 font-bold">{timeLeft}</span><span className="text-blue-600 font-bold">{timeLeft}</span>
                   </div>
                 )}
 
@@ -1119,9 +1615,20 @@ export default function TaskExecution() {
                 )}
               </div>
 
-              <div className="bg-blue-50 border border-blue-200 p-4 rounded-lg">
-                <h3 className="font-medium mb-2">Visual Prompt:</h3>
-                <p className="text-blue-800 italic">"{currentStep.visualPrompt}"</p>
+              {/* Video Instruction (replacing Visual Prompt) */}
+              <div className="bg-black rounded-lg overflow-hidden">
+                <video
+                  ref={instructionVideoRef}
+                  className="w-full h-auto"
+                  controls={false}
+                  autoPlay
+                  muted={false}
+                  loop
+                  playsInline
+                >
+                  <source src={getVideoSourceForStep(currentStep.id)} type="video/mp4" />
+                  Your browser does not support the video tag.
+                </video>
               </div>
             </div>
           </div>

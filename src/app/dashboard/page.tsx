@@ -882,14 +882,14 @@ function AIExercisesCard() {
         <h4 className="font-medium mb-2" style={{ color: colors.secondary }}>Today's Recommended Exercise</h4>
         <p className="mb-3" style={{ color: colors.text }}>Fine Motor Control: Hand-Eye Coordination</p>
         <p className="text-sm mb-4" style={{ color: colors.textLight }}>This 10-minute session helps improve dexterity and focus.</p>
-        <button className="w-full py-2 rounded-md hover:opacity-90 transition flex items-center justify-center" 
+        <Link href='/dashboard/exercise'><button className="w-full py-2 rounded-md hover:opacity-90 transition flex items-center justify-center" 
           style={{ backgroundColor: colors.highlight, color: colors.white }}>
           <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"></path>
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
           </svg>
           Start Exercise
-        </button>
+        </button></Link>
       </div>
       <div className="mt-4 flex justify-between items-center">
         <Link href="/exercises/all" className="font-medium text-sm flex items-center hover:opacity-90" style={{ color: colors.secondary }}>
@@ -1015,7 +1015,15 @@ function MeetingsCard({ meetings }: { meetings: Meeting[] }) {
     <div className="p-6 rounded-lg shadow-md border" style={{ backgroundColor: colors.white, borderColor: colors.primaryLight }}>
       <div className="flex items-center mb-4">
         <span className="text-2xl mr-2">📅</span>
+
         <h3 className="text-xl font-bold" style={{ color: colors.text }}>Scheduled Meets</h3>
+        <Link 
+                  href='/dashboard/event'
+                  
+                  style={{ backgroundColor: colors.highlight, color: colors.white }}
+                >
+                  <button className="flex-1 ml-2 m-3 rounded-xl hover:opacity-90 transition text-center text-sm mr-2">Schedule Meets</button>
+                </Link>
       </div>
       <p className="mb-4" style={{ color: colors.textLight }}>Your upcoming sessions and meetups:</p>
       {meetings.length > 0 ? (
@@ -1055,8 +1063,11 @@ function MeetingsCard({ meetings }: { meetings: Meeting[] }) {
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path>
                   </svg>
                 </button>
+                
               </div>
+              
             </div>
+            
           ))}
         </div>
       ) : (

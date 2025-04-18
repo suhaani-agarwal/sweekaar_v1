@@ -17,22 +17,6 @@ export const tasks = [
         },
         {
           id: 'step-2',
-          instruction: 'Wet the toothbrush under water',
-          visualPrompt: 'Toothbrush under running water',
-          audioPrompt: 'Now wet your toothbrush under water',
-          successCriteria: 'Toothbrush is wet',
-          defaultRepetition: 15
-        },
-        {
-          id: 'step-3',
-          instruction: 'Open the toothpaste',
-          visualPrompt: 'Twist cap off toothpaste',
-          audioPrompt: 'Open the toothpaste tube',
-          successCriteria: 'Toothpaste cap is off',
-          defaultRepetition: 20
-        },
-        {
-          id: 'step-4',
           instruction: 'Apply toothpaste to brush',
           visualPrompt: 'Toothpaste on bristles',
           audioPrompt: 'Put a small amount of toothpaste on your brush',
@@ -40,7 +24,7 @@ export const tasks = [
           defaultRepetition: 15
         },
         {
-          id: 'step-5',
+          id: 'step-3',
           instruction: 'Brush top teeth (30 seconds)',
           visualPrompt: 'Brushing top teeth',
           audioPrompt: 'Now brush your top teeth',
@@ -48,7 +32,15 @@ export const tasks = [
           defaultRepetition: 30
         },
         {
-          id: 'step-6',
+          id: 'step-4',
+          instruction: 'Brush top teeth (30 seconds)',
+          visualPrompt: 'Brushing top teeth',
+          audioPrompt: 'Now brush your top teeth',
+          successCriteria: 'Top teeth brushed',
+          defaultRepetition: 30
+        },
+        {
+          id: 'step-5',
           instruction: 'Brush bottom teeth (30 seconds)',
           visualPrompt: 'Brushing bottom teeth',
           audioPrompt: 'Now brush your bottom teeth',
@@ -56,7 +48,7 @@ export const tasks = [
           defaultRepetition: 30
         },
         {
-          id: 'step-7',
+          id: 'step-6',
           instruction: 'Rinse your mouth with water',
           visualPrompt: 'Child rinsing mouth',
           audioPrompt: 'Finally, rinse your mouth with water',
